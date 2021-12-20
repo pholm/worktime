@@ -6,13 +6,17 @@ const logSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
     },
-    timestamp: {
+    in: {
         type: Date,
         default: Date.now,
+        required: true,
+    },
+    out: {
+        type: Date,
     },
     type: {
         type: String,
-        enum: ['in', 'out'],
+        enum: ['automatic', 'manual'],
     },
 });
 

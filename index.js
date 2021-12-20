@@ -7,6 +7,7 @@ const bot = new Bot(token);
 const { User, Log, Day } = require('./models');
 const mongoose = require('mongoose');
 const { zonedTimeToUtc, utcToZonedTime, format } = require('date-fns-tz');
+var parse = require('date-fns/parse');
 var ObjectId = require('mongoose').Types.ObjectId;
 
 // connect to worktime db with user dbuser
@@ -54,18 +55,20 @@ bot.command('sisaan', async (ctx) => {
         ctx.reply('Et ole aloittanut botin käyttöä, aloita komennolla /aloita');
         // check if the latest log is type in
     } else {
-        const latestLog = await Log.findOne({ user: user.id }).sort({
-            timestamp: -1,
+        const latestLog = await Log.findOne({
+            user: user.id,
+            type: 'automatic',
+            out: { $exists: false },
+        }).sort({
+            in: -1,
         });
-        // check if there is no logs for the current user
-
-        if (latestLog && latestLog.type === 'in') {
+        if (latestLog) {
             ctx.reply('Olet jo kirjannut tänään sisään!');
         } else {
             const newLog = new Log({
                 user: user.id,
-                timestamp: Date.now(),
-                type: 'in',
+                in: Date.now(),
+                type: 'automatic',
             });
             await newLog.save();
             ctx.reply('Sisäänkirjaus lisätty');
@@ -78,27 +81,33 @@ bot.command('ulos', async (ctx) => {
     if (!user) {
         ctx.reply('Käytä ensin /aloita komentoa');
     } else {
-        const latestLog = await Log.findOne({ user: user.id }).sort({
-            timestamp: -1,
+        const latestLog = await Log.findOne({
+            user: user.id,
+            out: { $exists: false },
+            type: 'automatic',
+        }).sort({
+            in: -1,
         });
-        if (latestLog && latestLog.type === 'out') {
+        if (!latestLog) {
             ctx.reply(
-                'Vaikuttaa siltä, että unohdit kirjautua sisään tänään. Lisää tunnit manuaalisesti komennolla /paiva <aloitusaika muodossa hh:mm>'
+                'Vaikuttaa siltä, että unohdit kirjautua sisään tänään. Lisää tunnit manuaalisesti komennolla /paiva'
             );
+        } else if (latestLog.in.getDate() !== new Date().getDate()) {
+            ctx.reply(
+                'Vaikuttaa siltä, että viimeinen sisäänkirjaus ei ole tältä päivältä. Kirjaa tunnit manuaalisesti komennolla /paiva'
+            );
+            ctx.reply('Poistin viimeisimmän sisäänkirjauksen: ' + latestLog.in);
+            latestLog.remove();
         } else {
-            const newLog = new Log({
-                user: user.id,
-                timestamp: Date.now(),
-                type: 'out',
-            });
-            await newLog.save();
+            latestLog.out = Date.now();
+            await latestLog.save();
             ctx.reply('Uloskirjaus lisätty');
             // get the difference between the last log of type in and the current log of type out
-            const logs = await Log.find({ user: user.id });
-            const lastIn = _.findLast(logs, { type: 'in' });
-            const lastOut = _.findLast(logs, { type: 'out' });
-            const diff = lastOut.timestamp - lastIn.timestamp;
+            const diff = latestLog.out - latestLog.in;
+
+            // TODO: count these properly :D
             const hours = Math.floor(diff / 1000 / 60 / 60);
+            const minutes = Math.floor((diff / 1000 / 60) % 60);
             // new day
             const newDay = new Day({
                 user: user.id,
@@ -106,47 +115,49 @@ bot.command('ulos', async (ctx) => {
                 amount: hours,
             });
             await newDay.save();
-            ctx.reply(`Teit työtä ${hours} tuntia ja ${minutes} minuuttia!`);
+            ctx.reply(
+                `Teit työtä tänään ${hours} tuntia ja ${minutes} minuuttia!`
+            );
         }
     }
 });
 
 bot.command('paiva', async (ctx) => {
     const user = await User.findOne({ user: ctx.from.id });
+    console.log(ctx.message.text);
     if (!user) {
         ctx.reply('Käytä ensin /aloita komentoa');
+    } else if (ctx.message.text.split(' ').length !== 3) {
+        ctx.reply(
+            'Komennon käyttö: /paiva <pvm muodossa 1.1.2021> <tunnit:minuutit>'
+        );
     } else {
-        // get hours and minutes from the command, e.g. /paiva 2:30
-
-        const timeInput = ctx.message.text.split(' ')[1];
-        if (!timeInput) {
-            ctx.reply('Komennon muoto on /paiva <aloitusaika muodossa hh:mm>');
-        } else {
-            // check if latest log is type out
-            const latestLog = await Log.findOne({ user: user.id }).sort({
-                timestamp: -1,
-            });
-            if (latestLog && latestLog.type !== 'out') {
-                ctx.reply(
-                    'Kirjaa ulos ennen /paiva komennon käyttöä! Muuten homma kosahtaa...'
-                );
-            } else {
-                const hours = Number(timeInput.split(':')[0]);
-                const minutes = Number(timeInput.split(':')[1]);
-
-                // convert hours and minutes to full hours
-                const fullHours = hours + minutes / 60;
-                const newDay = new Day({
-                    user: user.id,
-                    amount: fullHours,
-                    date: new Date(),
-                });
-                await newDay.save();
-                ctx.reply(
-                    `Teit työtä ${hours} tuntia ja ${minutes} minuuttia!`
-                );
-            }
-        }
+        const [hours, minutes] = ctx.message.text.split(' ')[2].split(':');
+        const dateInput = ctx.message.text.split(' ')[1];
+        const parsedDAte = parse(dateInput, 'd.M.yyyy', new Date(), {
+            timeZone: 'Europe/Helsinki',
+        });
+        const StartTime = parsedDAte.setHours(0, 0, 0, 0);
+        const EndTime = parsedDAte.setHours(hours, minutes, 0, 0);
+        const newLog = new Log({
+            user: user.id,
+            // set in for start of current day
+            in: StartTime,
+            out: EndTime,
+            type: 'manual',
+        });
+        await newLog.save();
+        // convert hours and minutes to full hours
+        const fullHours = Number(hours) + Number(minutes) / 60;
+        const newDay = new Day({
+            user: user.id,
+            amount: fullHours,
+            date: StartTime,
+        });
+        await newDay.save();
+        ctx.reply(
+            `Kirjattu manuaalisesti ${hours} tuntia ja ${minutes} minuuttia päivälle ${dateInput}`
+        );
     }
 });
 
