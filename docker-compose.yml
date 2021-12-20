@@ -1,4 +1,4 @@
-version: '3.9'
+version: '3.3'
 services:
     worker:
         build: .
@@ -20,7 +20,7 @@ services:
         image: mongo
         restart: always
         volumes:
-            - mongovolume01:/var/lib/mongodb/database:/data/db
+            - 'mongovolume01:/var/lib/mongodb/database'
             - './docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d'
         environment:
             - MONGO_INITDB_ROOT_USERNAME=${DB_ADMIN_USER}
