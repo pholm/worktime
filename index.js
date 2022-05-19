@@ -6,13 +6,12 @@ const token = process.env.BOT_TOKEN;
 const bot = new Bot(token);
 const { User, Log, Day } = require('./models');
 const mongoose = require('mongoose');
-const { zonedTimeToUtc, utcToZonedTime, format } = require('date-fns-tz');
 var parse = require('date-fns/parse');
 var ObjectId = require('mongoose').Types.ObjectId;
 
 // connect to worktime db with user dbuser
 mongoose.connect(
-    `mongodb://${process.env.DB_USER}:${process.env.DB_PASS}@mongo:27017/${process.env.DB_NAME}`
+    `mongodb+srv://worktime:${process.env.DB_PASS}@cluster0.uw4uh3u.mongodb.net/?retryWrites=true&w=majority`
 );
 
 bot.command('start', (ctx) => ctx.reply('Welcome! Up and running.'));
